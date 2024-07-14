@@ -92,14 +92,16 @@ def test_send_email_msg():
 
     # Send the email
     user_email = 'l.sokolov@gmx.de'
+    attendees = ['leonid.sokolov@big-picture.com']
     user_name = 'leo'
     email = EmailCalendarInvite(
-        attendees=[user_email],
+        attendees=attendees,
+        from_name='Image2Cal',
         subject=f"Plz come! {event.name}",
         body=event.name,
         start=event.datetime,
-        adress=event.address,
+        address=event.address,
         organizer=user_name,
     )
     msg = email.create_invite_mail()
-    email.send_invite(attendees=[user_email], msg=msg)
+    email.send_invite()

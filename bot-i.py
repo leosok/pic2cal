@@ -141,15 +141,16 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         user_name = update.effective_user.first_name
 
         email = EmailCalendarInvite(
+            from_name="Image2Cal",
             attendees=[user_email],
-            subject=f"Plz come! {event.name}",
+            subject=f"{event.name}",
             body=event.name,
             start=event.datetime,
-            adress=event.address,
+            address=event.address,
             organizer=user_name,
         )
-        msg = email.create_invite_mail()
-        email.send_invite(msg)
+        email.create_invite_mail()
+        email.send_invite()
 
     elif action == "cancel":
         # Implement the action for canceling the event
