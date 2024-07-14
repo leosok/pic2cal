@@ -82,7 +82,7 @@ def get_image_description_as_json(
 ) -> ImageResponse:
     if image_path:
         base64_image = encode_image(image_path)
-    elif not base64_image:
+    elif not base64_image and not test_data:
         raise ValueError("You must provide either an image path or a base64 encoded")
 
     

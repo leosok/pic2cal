@@ -86,10 +86,9 @@ def test_get_image_description_as_json():
 # test the send_email with the events
 def test_send_email_msg():
 
-    image_response = get_image_description_as_json(test_json1)
+    image_response = get_image_description_as_json(test_data=test_json1)
 
-    first_event = image_response.events[0] 
-    event = Event(**first_event)
+    event = image_response.events[0]
 
     # Send the email
     user_email = 'l.sokolov@gmx.de'
@@ -103,4 +102,4 @@ def test_send_email_msg():
         organizer=user_name,
     )
     msg = email.create_invite_mail()
-    email.send_invite(msg)  
+    email.send_invite(attendees=[user_email], msg=msg)

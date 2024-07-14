@@ -42,7 +42,7 @@ class EmailCalendarInvite:
         self.duration = duration
         self.end = end
 
-    def create_invite_mail(self):
+    def create_invite_mail(self) -> MIMEMultipart:
         if self.end is None:
             if self.duration is None:
                 duration = datetime.timedelta(minutes=30)
@@ -143,9 +143,9 @@ class EmailCalendarInvite:
         msg.attach(ical_atch)
         return msg
 
-    def send_invite(self, msg):
+    def send_invite(self, attendees, msg):
         with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
             server.ehlo()
             server.starttls()
             server.login(self.login, self.password)
-            server.sendmail(msg["From"], self.attendees, msg.as_string())
+            server.sendmail(msg["From"], attendees, msg.as_string() )
