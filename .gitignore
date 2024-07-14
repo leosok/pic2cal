@@ -42,5 +42,6 @@ Thumbs.db
 *.jpg
 *.jpeg
 
-# Environment files
+# env
 .env
+.pickle
