@@ -204,6 +204,8 @@ def main():
     app.add_handler(MessageHandler(PHOTO, handle_image))
     app.add_handler(MessageHandler(TEXT, handle_text))
 
+    app.run_webhook( listen="0.0.0.0", port=9999, url_path="healthcheck")
+
     logger.info("Bot is ready to receive messages")
     app.run_polling()
 
