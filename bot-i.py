@@ -1,3 +1,4 @@
+import logging
 from html import escape
 import os
 from uuid import uuid4
@@ -27,6 +28,21 @@ from open_ai_image_handler import Event
 USER_EMAIL_KEY = "user_email_adress"
 USER_IS_EXPERT_KEY = "user_is_expert"
 load_dotenv()
+
+
+def setup_logging() -> logging.Logger:
+    """
+    Setup the logging for the bot
+    :return:
+    """
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+
+    # Silence httpx logger
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    return logging.getLogger(__name__)
 
 
 # A handler for starting the bot
@@ -164,6 +180,8 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
 
 
 def main():
+    logger = setup_logging()
+    logger.info("Starting TELEGRAM bot")
     persistence = PicklePersistence(
         filepath="conversationbot.pickle", update_interval=10
     )

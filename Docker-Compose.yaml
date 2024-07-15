@@ -1,0 +1,13 @@
+# Dockercompose to run Dockerfile
+
+version: '3.8'
+services:
+  app:
+    #command: /bin/bash -c "python bot-i.py"
+      # just keep running
+    #stdin_open: true
+    build: .
+    volumes:
+      - .:/app
+    env_file:
+      - .env

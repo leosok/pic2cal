@@ -1,11 +1,17 @@
-FROM ubuntu:latest
-LABEL authors="leonidsokolov"
+# use python-slim as base image
+FROM python:3.11-slim
 
-# I need a python, install poetry and create a virtual environment then run boz-i.py
-RUN apt-get update && apt-get install -y python3 python3-pip
-RUN pip3 install poetry
-RUN poetry config virtualenvs.create true
-RUN poetry install
-RUN poetry run boz-i.py
+# Set the working directory in the container
+WORKDIR /app
 
-ENTRYPOINT ["top", "-b"]
+# Install poetry and dependencies
+RUN pip install poetry==1.4.2
+COPY pyproject.toml poetry.lock ./
+RUN poetry config virtualenvs.create false \
+    && poetry install --without dev
+
+# Copy the source code into the container
+COPY . .
+
+# Run the application
+CMD ["python", "bot-i.py"]
