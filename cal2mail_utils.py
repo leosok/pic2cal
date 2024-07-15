@@ -1,3 +1,4 @@
+import logging
 import smtplib
 import datetime
 import os
@@ -106,4 +107,4 @@ class EmailCalendarInvite:
             server.starttls()
             server.login(self.login, self.password)
             server.sendmail(self.login, self.attendees, self.create_invite_mail().as_string())
-        print("Email sent! to ", self.attendees)
+        logging.getLogger(__name__).info(f"Email sent from {self.login}! to { self.attendees}")

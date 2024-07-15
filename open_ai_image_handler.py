@@ -24,7 +24,7 @@ class Event(BaseModel):
 
 class ImageResponse(BaseModel):
     message: str
-    events: List[Event]
+    events: Optional[List[Event]] = []
 
 
 load_dotenv()
@@ -78,7 +78,7 @@ def get_image_description_as_json(
     image_path: str = None,
     prompt: str = PROMPT_IMG_2_JSON_EVENTS,
     as_json=True,
-    test_data=None,
+    test_data=None
 ) -> ImageResponse:
     if image_path:
         base64_image = encode_image(image_path)
@@ -108,9 +108,7 @@ def get_image_description_as_json(
     else:
       resp = test_data
 
-
-    logging.info(resp)
-    print(resp)
+    logging.getLogger().info(resp)
     if as_json:
         clean_resp = clean_json_string(resp)
         return ImageResponse.model_validate_json(clean_resp)
