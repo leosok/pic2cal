@@ -1,7 +1,10 @@
+import asyncio
 import logging
 from html import escape
 import os
 from uuid import uuid4
+
+from aiohttp import web
 from dotenv import load_dotenv
 from telegram import Update, File
 from telegram.ext import (
@@ -185,18 +188,14 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     del context.chat_data[event_id]
     logger.info(f"Event {event_id} removed from chat data")
 
+async def health(request):
+    """A simple health check endpoint."""
+    return web.Response(text="OK")
 
 def main():
     logger.info("Starting TELEGRAM bot")
-    persistence = PicklePersistence(
-        filepath="conversationbot.pickle", update_interval=10
-    )
-    app = (
-        ApplicationBuilder()
-        .token(os.environ.get("TELEGRAM_TOKEN"))
-        .persistence(persistence)
-        .build()
-    )
+    persistence = PicklePersistence(filepath="conversationbot.pickle", update_interval=10)
+    app = ApplicationBuilder().token(os.environ.get("TELEGRAM_TOKEN")).persistence(persistence).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("email", set_email))
@@ -204,10 +203,20 @@ def main():
     app.add_handler(MessageHandler(PHOTO, handle_image))
     app.add_handler(MessageHandler(TEXT, handle_text))
 
-    app.run_webhook( listen="0.0.0.0", port=9999, url_path="healthcheck")
+    # Set up aiohttp web server
+    web_app = web.Application()
+    web_app.router.add_get('/healthz', health)
 
-    logger.info("Bot is ready to receive messages")
-    app.run_polling()
+    # Run the web server and bot together
+    runner = web.AppRunner(web_app)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(runner.setup())
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    loop.run_until_complete(site.start())
+
+    logger.info("Bot is ready to receive messages and web server is running")
+    loop.run_until_complete(app.run_polling())
+
 
 
 if __name__ == "__main__":
