@@ -42,8 +42,9 @@ def setup_logging() -> logging.Logger:
         level=logging.INFO
     )
 
-    # Silence httpx logger
+    # Silence httpx and aiohttp logger
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("aiohttp").setLevel(logging.WARNING)
     return logging.getLogger(__name__)
 
 
