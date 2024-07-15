@@ -25,7 +25,7 @@ class EmailCalendarInvite:
         description: str = "Please set Description",
         duration: datetime.timedelta = None,
         end: datetime.datetime = None,
-        timezone: str = pytz.utc.tzname,
+        timezone: str = 'UTC',
     ):
         self.login = os.getenv("EMAIL_LOGIN")
         self.password = os.getenv("EMAIL_PASSWORD")
