@@ -8,9 +8,11 @@ from email.mime.text import MIMEText
 from email.utils import formatdate
 from email import encoders
 from typing import List
+import pytz
 
 
 class EmailCalendarInvite:
+    DEFAULT_TIMEZONE = "Europe/Berlin"
     CRLF = "\r\n"
 
     def __init__(
@@ -25,6 +27,7 @@ class EmailCalendarInvite:
         description: str = "Please set Description",
         duration: datetime.timedelta = None,
         end: datetime.datetime = None,
+        timezone: str = DEFAULT_TIMEZONE,
     ):
         self.login = os.getenv("EMAIL_LOGIN")
         self.password = os.getenv("EMAIL_PASSWORD")
@@ -40,6 +43,7 @@ class EmailCalendarInvite:
         self.address = address
         self.duration = duration or datetime.timedelta(hours=1)
         self.end = end or start + self.duration
+        self.timezone = timezone
 
     def create_invite_mail(self) -> MIMEMultipart:
 
@@ -48,9 +52,12 @@ class EmailCalendarInvite:
 
         organizer = f"ORGANIZER;CN={self.organizer}"
         fro_m = f"{self.from_name} <{self.login}>"
-        dtstart = self.start.strftime("%Y%m%dT%H%M%SZ")
-        dtend = self.end.strftime("%Y%m%dT%H%M%SZ")
-        dtstamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%SZ")
+
+        # change the timezone to the one of the event
+        dtstart = self.start.astimezone(pytz.timezone(self.timezone)).strftime("%Y%m%dT%H%M%SZ")
+        dtend = self.end.astimezone(pytz.timezone(self.timezone)).strftime("%Y%m%dT%H%M%SZ")
+        dtstamp = datetime.datetime.now().astimezone(pytz.timezone(self.timezone)).strftime("%Y%m%dT%H%M%SZ")
+
 
         attendees_formatted = ""
         for att in self.attendees:
