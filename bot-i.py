@@ -30,7 +30,7 @@ from open_ai_image_handler import Event
 
 USER_EMAIL_KEY = "user_email_adress"
 USER_IS_EXPERT_KEY = "user_is_expert"
-berlin_tz = pytz.timezone('Europe/Berlin')
+TIMEZONE = 'Europe/Berlin'
 load_dotenv()
 
 
@@ -173,9 +173,10 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             attendees=[user_email],
             subject=f"{event.name}",
             body=event.name,
-            start=berlin_tz.localize(event.datetime),
+            start=event.datetime,
             address=event.address,
             organizer=user_name,
+            timezone=TIMEZONE
         )
         email.create_invite_mail()
         email.send_invite()
