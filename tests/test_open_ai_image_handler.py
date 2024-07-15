@@ -94,7 +94,7 @@ def test_send_email_msg():
     # Send the email
     user_email = 'l.sokolov@gmx.de'
     attendees = ['leonid.sokolov@big-picture.com']
-    berlin_tz = pytz.timezone('Europe/Berlin')
+    berlin_tz = 'Europe/Berlin'
     user_name = 'leo'
     email = EmailCalendarInvite(
         attendees=attendees,

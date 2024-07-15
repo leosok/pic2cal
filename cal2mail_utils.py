@@ -27,7 +27,7 @@ class EmailCalendarInvite:
         description: str = "Please set Description",
         duration: datetime.timedelta = None,
         end: datetime.datetime = None,
-        timezone: pytz.timezone = pytz.utc,
+        timezone: str = pytz.utc.tzname,
     ):
         self.login = os.getenv("EMAIL_LOGIN")
         self.password = os.getenv("EMAIL_PASSWORD")
@@ -41,26 +41,29 @@ class EmailCalendarInvite:
         self.description = description
         self.address = address
 
-        self.timezone = timezone  # set the timezone of the event
+        self.timezone_str = timezone  # set the timezone of the event
         self.start = start
         self.duration = duration or datetime.timedelta(hours=1)
         self.end = end or start + self.duration
 
 
-    def create_invite_mail(self, timezone_of_events='UTC') -> MIMEMultipart:
+    def create_invite_mail(self) -> MIMEMultipart:
 
         ORG = 'Image2Cal Bot'
         LANG = 'EN'
 
         organizer = f"ORGANIZER;CN={self.organizer}"
         fro_m = f"{self.from_name} <{self.login}>"
-        dtstart = self.timezone.localize(self.start).strftime("%Y%m%dT%H%M%S")
-        dtend = self.timezone.localize(self.end).strftime("%Y%m%dT%H%M%S")
-        dtstamp = self.timezone.localize(datetime.datetime.now()).strftime("%Y%m%dT%H%M%S")
+        dtstart = self.start.strftime("%Y%m%dT%H%M%S")
+        dtend = self.end.strftime("%Y%m%dT%H%M%S")
+        dtstamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
 
         attendees_formatted = ""
         for att in self.attendees:
             attendees_formatted += (f"ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE;CN={att}:mailto:{att}{self.CRLF}")
+
+        # First, define the timezone
+        tz_id = self.timezone_str
 
         ical = (f"BEGIN:VCALENDAR{self.CRLF}"
                 f"PRODID:-//{ORG}//{ORG}//{LANG}{self.CRLF}"
@@ -68,9 +71,9 @@ class EmailCalendarInvite:
                 f"CALSCALE:GREGORIAN{self.CRLF}"
                 f"METHOD:REQUEST{self.CRLF}"
                 f"BEGIN:VEVENT{self.CRLF}"
-                f"DTSTART:{dtstart}{self.CRLF}"
-                f"DTEND:{dtend}{self.CRLF}"
-                f"DTSTAMP:{dtstamp}{self.CRLF}"
+                f"DTSTART;TZID={tz_id}:{dtstart}{self.CRLF}"
+                f"DTEND;TZID={tz_id}:{dtend}{self.CRLF}"
+                f"DTSTAMP:{tz_id}:{dtstamp}{self.CRLF}"
                 f"{organizer}{self.CRLF}"
                 f"UID:FIXMEUID{dtstamp}{self.CRLF}"
                 f"{attendees_formatted}"
