@@ -9,6 +9,8 @@ from email.utils import formatdate
 from email import encoders
 from typing import List
 
+import pytz
+
 
 class EmailCalendarInvite:
     CRLF = "\r\n"
@@ -25,6 +27,7 @@ class EmailCalendarInvite:
         description: str = "Please set Description",
         duration: datetime.timedelta = None,
         end: datetime.datetime = None,
+        timezone: pytz.timezone = pytz.utc,
     ):
         self.login = os.getenv("EMAIL_LOGIN")
         self.password = os.getenv("EMAIL_PASSWORD")
@@ -34,23 +37,26 @@ class EmailCalendarInvite:
         self.attendees = attendees
         self.subject = subject
         self.body = body
-        self.start = start
         self.organizer = organizer
         self.description = description
         self.address = address
+
+        self.timezone = timezone  # set the timezone of the event
+        self.start = start
         self.duration = duration or datetime.timedelta(hours=1)
         self.end = end or start + self.duration
 
-    def create_invite_mail(self) -> MIMEMultipart:
+
+    def create_invite_mail(self, timezone_of_events='UTC') -> MIMEMultipart:
 
         ORG = 'Image2Cal Bot'
         LANG = 'EN'
 
         organizer = f"ORGANIZER;CN={self.organizer}"
         fro_m = f"{self.from_name} <{self.login}>"
-        dtstart = self.start.strftime("%Y%m%dT%H%M%SZ")
-        dtend = self.end.strftime("%Y%m%dT%H%M%SZ")
-        dtstamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%SZ")
+        dtstart = self.timezone.localize(self.start).strftime("%Y%m%dT%H%M%S")
+        dtend = self.timezone.localize(self.end).strftime("%Y%m%dT%H%M%S")
+        dtstamp = self.timezone.localize(datetime.datetime.now()).strftime("%Y%m%dT%H%M%S")
 
         attendees_formatted = ""
         for att in self.attendees:

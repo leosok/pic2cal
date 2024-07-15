@@ -1,4 +1,5 @@
 import pytest
+import pytz
 
 from cal2mail_utils import EmailCalendarInvite
 from open_ai_image_handler import Event, get_image_description_as_json
@@ -93,6 +94,7 @@ def test_send_email_msg():
     # Send the email
     user_email = 'l.sokolov@gmx.de'
     attendees = ['leonid.sokolov@big-picture.com']
+    berlin_tz = pytz.timezone('Europe/Berlin')
     user_name = 'leo'
     email = EmailCalendarInvite(
         attendees=attendees,
@@ -102,6 +104,7 @@ def test_send_email_msg():
         start=event.datetime,
         address=event.address,
         organizer=user_name,
+        timezone=berlin_tz
     )
     msg = email.create_invite_mail()
     email.send_invite()
