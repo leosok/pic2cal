@@ -9,8 +9,6 @@ from email.utils import formatdate
 from email import encoders
 from typing import List
 
-import pytz
-
 
 class EmailCalendarInvite:
     CRLF = "\r\n"
@@ -45,6 +43,7 @@ class EmailCalendarInvite:
         self.start = start
         self.duration = duration or datetime.timedelta(hours=1)
         self.end = end or start + self.duration
+        self.timezone = timezone
 
 
     def create_invite_mail(self) -> MIMEMultipart:
