@@ -2,6 +2,7 @@ import base64
 import datetime
 import json
 import logging
+import os
 import pprint
 from typing import List, Optional
 from urllib import response
@@ -87,8 +88,9 @@ def get_image_description_as_json(
 
     
     if not test_data:
+      oai_model = os.getenv("OPENAI_MODEL","gpt-4o")
       response = client.chat.completions.create(
-          model="gpt-4o",
+          model=oai_model,
           temperature=0.2,
           messages=[
               {
@@ -102,7 +104,7 @@ def get_image_description_as_json(
                   ],
               }
           ],
-          max_tokens=300,
+          max_tokens=1000,
       )
       resp = response.choices[0].message.content
     else:
