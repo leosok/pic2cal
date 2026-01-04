@@ -32,6 +32,7 @@ class EmailCalendarInvite:
         self.smtp_server = os.getenv("SMTP_SERVER")
         self.smtp_port = int(os.getenv("SMTP_PORT", 587))
         self.from_name = from_name or os.getenv("FROM_NAME")
+        self.from_email = os.getenv("FROM_EMAIL", self.login) # will use login email if FROM_EMAIL not set; need it for logins which are not emails
         self.attendees = attendees
         self.subject = subject
         self.body = body
@@ -52,7 +53,7 @@ class EmailCalendarInvite:
         LANG = 'EN'
 
         organizer = f"ORGANIZER;CN={self.organizer}"
-        fro_m = f"{self.from_name} <{self.login}>"
+        fro_m = f"{self.from_name} <{self.from_email}>"
         dtstart = self.start.strftime("%Y%m%dT%H%M%S")
         dtend = self.end.strftime("%Y%m%dT%H%M%S")
         dtstamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
@@ -114,5 +115,5 @@ class EmailCalendarInvite:
         with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
             server.starttls()
             server.login(self.login, self.password)
-            server.sendmail(self.login, self.attendees, self.create_invite_mail().as_string())
-        logging.getLogger(__name__).info(f"Email sent from {self.login}! to { self.attendees}")
+            server.sendmail(self.from_email, self.attendees, self.create_invite_mail().as_string())
+        logging.getLogger(__name__).info(f"Email sent from {self.from_email}! to { self.attendees}")

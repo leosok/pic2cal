@@ -196,6 +196,10 @@ async def health(request):
     """A simple health check endpoint."""
     return web.Response(text="OK")
 
+async def incoming(request):
+    """Incoming webhook endpoint that returns 200."""
+    return web.Response(status=200)
+
 def main():
     logger.info("Starting TELEGRAM bot")
     persistence = PicklePersistence(filepath="conversationbot.pickle", update_interval=10)
@@ -210,6 +214,7 @@ def main():
     # Set up aiohttp web server
     web_app = web.Application()
     web_app.router.add_get('/healthz', health)
+    web_app.router.add_post('/incoming', incoming)
 
     # Run the web server and bot together
     runner = web.AppRunner(web_app)
