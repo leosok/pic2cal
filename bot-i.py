@@ -17,11 +17,11 @@ from telegram.ext import (
 )
 from telegram.ext.filters import COMMAND, PHOTO, TEXT
 from telegram.ext import PicklePersistence
-from open_ai_image_handler import Event, get_image_description_as_json
+from open_ai_image_handler import Event, get_image_description_as_json, resolve_event_end
 import re
 from telegram.constants import ParseMode
 from telegram.ext import CallbackQueryHandler
-from cal2mail_utils import EmailCalendarInvite
+from cal2mail_utils import DEFAULT_EVENT_DURATION, EmailCalendarInvite
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
@@ -50,8 +50,15 @@ def setup_logging() -> logging.Logger:
 logger = setup_logging()
 
 def event_summary(event: Event) -> str:
+    schedule = event.readable_datetime_str
+    if event.datetime is not None:
+        end = event.end_datetime or (event.datetime + DEFAULT_EVENT_DURATION)
+        end_format = "%H:%M" if end.date() == event.datetime.date() else "%A, %d %B %Y %H:%M"
+        schedule += f" → {end.strftime(end_format)}"
+        if event.end_datetime is None:
+            schedule += " (1-hour default)"
     address = f"\n{escape(event.address)}" if event.address else ""
-    return f"<b>{escape(event.name)}</b>\n<i>{event.readable_datetime_str}</i>{address}"
+    return f"<b>{escape(event.name)}</b>\n<i>{schedule}</i>{address}"
 
 
 def event_buttons(event_id):
@@ -70,6 +77,11 @@ async def ask_event_detail(message, context, event_id, event, field):
         question = "What time does it start? Reply with HH:MM." if has_date else (
             "When does it start? Reply with YYYY-MM-DD HH:MM."
         )
+    elif field == "end":
+        question = (
+            "What time does it end? Reply with HH:MM, or YYYY-MM-DD HH:MM to specify the date. "
+            "A time earlier than the start is treated as the following day."
+        )
     else:
         question = "Where is it? Reply with the venue name or address."
 
@@ -85,8 +97,6 @@ async def ask_event_detail(message, context, event_id, event, field):
 async def show_event(message, context, event_id, event):
     if event.datetime is None:
         await ask_event_detail(message, context, event_id, event, "time")
-    elif not event.address:
-        await ask_event_detail(message, context, event_id, event, "location")
     else:
         await message.reply_text(
             event_summary(event),
@@ -125,6 +135,22 @@ async def handle_event_reply(update, context):
             )
             return True
         event.event_date = event.datetime.date()
+        if event.end_datetime is not None and event.end_datetime <= event.datetime:
+            event.end_datetime = None
+    elif field == "end":
+        try:
+            end_date = None
+            if " " in value:
+                end = datetime.strptime(value, "%Y-%m-%d %H:%M")
+                end_date = end.date()
+            else:
+                end = datetime.strptime(value, "%H:%M")
+            event.end_datetime = resolve_event_end(event.datetime, end.time(), end_date)
+        except ValueError:
+            await message.reply_text(
+                "Enter an end after the start. Use HH:MM or YYYY-MM-DD HH:MM."
+            )
+            return True
     else:
         if not value or "\n" in value or "\r" in value:
             await message.reply_text("Please enter the venue name or address on one line.")
@@ -237,7 +263,8 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     if action == "edit":
         await query.edit_message_reply_markup(InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("Time", callback_data=f"time_{event_id}"),
+                InlineKeyboardButton("Start time", callback_data=f"time_{event_id}"),
+                InlineKeyboardButton("End time", callback_data=f"end_{event_id}"),
                 InlineKeyboardButton("Location", callback_data=f"location_{event_id}"),
                 InlineKeyboardButton("Back", callback_data=f"back_{event_id}"),
             ]
@@ -246,12 +273,12 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     if action == "back":
         await query.edit_message_reply_markup(event_buttons(event_id))
         return
-    if action in ("time", "location"):
+    if action in ("time", "end", "location"):
         event_data.setdefault("owner_id", user.id)
         await ask_event_detail(query.message, context, event_id, event, action)
         await query.edit_message_reply_markup(reply_markup=None)
         return
-    if action == "send" and (event.datetime is None or not event.address):
+    if action == "send" and event.datetime is None:
         event_data.setdefault("owner_id", user.id)
         await show_event(query.message, context, event_id, event)
         await query.edit_message_reply_markup(reply_markup=None)
@@ -269,6 +296,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             subject=f"{event.name}",
             body=event.name,
             start=event.datetime,
+            end=event.end_datetime,
             address=event.address,
             organizer=user.first_name,
             timezone=TIMEZONE
@@ -306,7 +334,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("email", set_email))
     app.add_handler(CallbackQueryHandler(
-        button_callback_handler, pattern=r"^(send|cancel|edit|time|location|back)_[0-9a-f-]+$"
+        button_callback_handler, pattern=r"^(send|cancel|edit|time|end|location|back)_[0-9a-f-]+$"
     ))
     app.add_handler(MessageHandler(PHOTO, handle_image))
     app.add_handler(MessageHandler(TEXT & ~COMMAND, handle_text))

@@ -1,7 +1,7 @@
 import base64
 import os
 import re
-from datetime import date, datetime as DateTime, time
+from datetime import date, datetime as DateTime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -14,11 +14,12 @@ class Event(BaseModel):
     datetime: DateTime | None = None
     address: str | None = None
     event_date: date | None = None
+    end_datetime: DateTime | None = None
 
     @property
     def readable_datetime_str(self) -> str:
         if self.datetime is not None:
-            return self.datetime.strftime("%A, %d %B %Y %H:%M:%S")
+            return self.datetime.strftime("%A, %d %B %Y %H:%M")
         if self.event_date is not None:
             return self.event_date.strftime("%A, %d %B %Y")
         return "Date and time unknown"
@@ -33,6 +34,8 @@ class ExtractedEvent(BaseModel, extra="forbid"):
     name: str
     date: date | None
     time: time | None
+    end_time: time | None
+    end_date: date | None
     address: str | None
 
 
@@ -45,10 +48,49 @@ load_dotenv()
 PROMPT_IMG_2_JSON_EVENTS = """
 Extract events from the image. Preserve their names as written.
 Use the current year when the year is missing.
-Return null for an unreadable or missing date, start time or location.
-Use 00:00 only if the image explicitly says the event starts at midnight.
+Return null for an unreadable or missing date, start time, end time or location.
+Extract the event's actual start and end, rather than doors opening or last admission.
+If the event has an explicit duration and a start time, you may calculate the end.
+Only use midnight when stated, shown as 00:00 or 24:00, or implied by an explicit duration.
+For 24:00, use 00:00 on the following date.
+Set end_date only if the event's ending date is stated, or calculated from 24:00 or an explicit duration.
+For a time range without a separate end date, leave end_date null.
 Use the venue name and address as shown. Do not guess a location.
 """
+
+
+def resolve_event_end(start: DateTime, end_time: time, end_date: date | None = None) -> DateTime:
+    end = DateTime.combine(end_date or start.date(), end_time.replace(tzinfo=None))
+    if end_date is None and end < start:
+        end += timedelta(days=1)
+    if end <= start:
+        raise ValueError("The end must be after the start.")
+    return end
+
+
+def to_event(item: ExtractedEvent) -> Event:
+    start = None
+    if item.date is not None and item.time is not None:
+        start = DateTime.combine(item.date, item.time.replace(tzinfo=None))
+
+    end = None
+    if item.end_time is not None:
+        if start is not None:
+            try:
+                end = resolve_event_end(start, item.end_time, item.end_date)
+            except ValueError:
+                # Ask for an end time if the extracted interval is inconsistent.
+                pass
+        elif item.end_date or item.date:
+            end = DateTime.combine(item.end_date or item.date, item.end_time.replace(tzinfo=None))
+
+    return Event(
+        name=item.name,
+        datetime=start,
+        event_date=item.date,
+        end_datetime=end,
+        address=(item.address or "").strip() or None,
+    )
 
 
 def clean_json_string(json_string):
@@ -115,14 +157,5 @@ def get_image_description_as_json(
         return extracted.message
     return ImageResponse(
         message=extracted.message,
-        events=[
-            Event(
-                name=item.name,
-                datetime=DateTime.combine(item.date, item.time.replace(tzinfo=None))
-                if item.date is not None and item.time is not None else None,
-                event_date=item.date,
-                address=item.address.strip() or None if item.address else None,
-            )
-            for item in extracted.events
-        ],
+        events=[to_event(item) for item in extracted.events],
     )

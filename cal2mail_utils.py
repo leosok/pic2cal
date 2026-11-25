@@ -10,6 +10,9 @@ from email import encoders
 from typing import List
 
 
+DEFAULT_EVENT_DURATION = datetime.timedelta(hours=1)
+
+
 class EmailCalendarInvite:
     CRLF = "\r\n"
 
@@ -42,7 +45,7 @@ class EmailCalendarInvite:
 
         self.timezone_str = timezone  # set the timezone of the event
         self.start = start
-        self.duration = duration or datetime.timedelta(hours=1)
+        self.duration = duration or DEFAULT_EVENT_DURATION
         self.end = end or start + self.duration
         self.timezone = timezone
 
