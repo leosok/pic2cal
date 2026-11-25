@@ -1,119 +1,128 @@
 import base64
-import datetime
-import json
-import logging
 import os
-import pprint
-from typing import List, Optional
-from urllib import response
-from openai import OpenAI
-from dotenv import load_dotenv
 import re
-from pprint import pprint
-from pydantic import BaseModel
+from datetime import date, datetime as DateTime, time
+from zoneinfo import ZoneInfo
+
+from dotenv import load_dotenv
+from openai import OpenAI
+from pydantic import BaseModel, Field
 
 
 class Event(BaseModel):
     name: str
-    datetime: datetime.datetime
-    address: Optional[str] = None
+    datetime: DateTime | None = None
+    address: str | None = None
+    event_date: date | None = None
 
     @property
     def readable_datetime_str(self) -> str:
-        return self.datetime.strftime("%A, %d %B %Y %H:%M:%S")
+        if self.datetime is not None:
+            return self.datetime.strftime("%A, %d %B %Y %H:%M:%S")
+        if self.event_date is not None:
+            return self.event_date.strftime("%A, %d %B %Y")
+        return "Date and time unknown"
 
 
 class ImageResponse(BaseModel):
     message: str
-    events: Optional[List[Event]] = []
+    events: list[Event] = Field(default_factory=list)
+
+
+class ExtractedEvent(BaseModel, extra="forbid"):
+    name: str
+    date: date | None
+    time: time | None
+    address: str | None
+
+
+class ExtractedImage(BaseModel, extra="forbid"):
+    message: str
+    events: list[ExtractedEvent]
 
 
 load_dotenv()
-
-client = OpenAI()
-PROMPT_IMG_2_JSON_EVENTS = (
-    """
-You are helping to digitalize a photo of an event / events. 
-If no year is provided, assume the current year: 
+PROMPT_IMG_2_JSON_EVENTS = """
+Extract events from the image. Preserve their names as written.
+Use the current year when the year is missing.
+Return null for an unreadable or missing date, start time or location.
+Use 00:00 only if the image explicitly says the event starts at midnight.
+Use the venue name and address as shown. Do not guess a location.
 """
-    + f"{datetime.datetime.now().isoformat()}"
-    + """
-If you find the event name, please make them unique by adding a number like foo, foo1.
-If you find an event you answer with a JSON like this:
-{
-  "message": "2 events found.",
-  "events": [
-    {
-      "name": "Event Name 1",
-      "datetime": "YYYY-MM-DDTHH:MM:SS",
-      "address": "123 Example St, City"
-    },
-    {
-      "name": "Event Name 2",
-      "datetime": "YYYY-MM-DDTHH:MM:SS",
-      "address": null
-    }
-    // More events can be listed in this array
-  ]
-}
-
-"""
-)
 
 
-# Function to clean the JSON string which is sometimes wrapped in Markdown code blocks
 def clean_json_string(json_string):
     pattern = r"^```json\s*(.*?)\s*```$"
-    cleaned_string = re.sub(pattern, r"\1", json_string, flags=re.DOTALL)
-    return cleaned_string.strip()
+    return re.sub(pattern, r"\1", json_string.strip(), flags=re.DOTALL)
 
 
-# Function to encode the image
-def encode_image(image_path) -> base64:
+def encode_image(image_path) -> str:
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode("utf-8")
 
 
 def get_image_description_as_json(
-    base64_image: base64 = None,
-    image_path: str = None,
+    base64_image: str | None = None,
+    image_path: str | None = None,
     prompt: str = PROMPT_IMG_2_JSON_EVENTS,
     as_json=True,
-    test_data=None
-) -> ImageResponse:
+    test_data=None,
+) -> ImageResponse | str:
+    if test_data is not None:
+        return ImageResponse.model_validate_json(clean_json_string(test_data)) if as_json else test_data
+
     if image_path:
         base64_image = encode_image(image_path)
-    elif not base64_image and not test_data:
-        raise ValueError("You must provide either an image path or a base64 encoded")
+    if not base64_image:
+        raise ValueError("Provide an image path or a base64-encoded image.")
 
-    
-    if not test_data:
-      oai_model = os.getenv("OPENAI_MODEL","gpt-4o")
-      response = client.chat.completions.create(
-          model=oai_model,
-          temperature=0.2,
-          messages=[
-              {
-                  "role": "user",
-                  "content": [
-                      {"type": "text", "text": PROMPT_IMG_2_JSON_EVENTS},
-                      {
-                          "type": "image_url",
-                          "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
-                      },
-                  ],
-              }
-          ],
-          max_tokens=1000,
-      )
-      resp = response.choices[0].message.content
-    else:
-      resp = test_data
+    today = DateTime.now(ZoneInfo("Europe/Berlin")).date()
+    with OpenAI() as client:
+        response = client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-6.1-terra"),
+            messages=[
+                {"role": "system", "content": f"{prompt}\nToday's date is {today.isoformat()}."},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Extract the events shown in this image."},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                        },
+                    ],
+                },
+            ],
+            extra_body={
+                "max_completion_tokens": 4096,
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "event_extraction",
+                        "strict": True,
+                        "schema": ExtractedImage.model_json_schema(),
+                    },
+                },
+            },
+        )
 
-    logging.getLogger().info(resp)
-    if as_json:
-        clean_resp = clean_json_string(resp)
-        return ImageResponse.model_validate_json(clean_resp)
-    else:
-        return resp.message
+    choice = response.choices[0]
+    if choice.finish_reason != "stop" or not choice.message.content:
+        raise ValueError("The image could not be processed. Please try another photo.")
 
+    extracted = ExtractedImage.model_validate_json(choice.message.content)
+    if not as_json:
+        return extracted.message
+    return ImageResponse(
+        message=extracted.message,
+        events=[
+            Event(
+                name=item.name,
+                datetime=DateTime.combine(item.date, item.time.replace(tzinfo=None))
+                if item.date is not None and item.time is not None else None,
+                event_date=item.date,
+                address=item.address.strip() or None if item.address else None,
+            )
+            for item in extracted.events
+        ],
+    )

@@ -1,32 +1,29 @@
 import asyncio
 import logging
+from datetime import datetime
 from html import escape
 import os
 from uuid import uuid4
 
-import pytz
 from aiohttp import web
 from dotenv import load_dotenv
-from telegram import Update, File
+from openai import OpenAIError
+from telegram import Update, File, ForceReply
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
     MessageHandler,
 )
-from telegram.ext.filters import PHOTO, TEXT
+from telegram.ext.filters import COMMAND, PHOTO, TEXT
 from telegram.ext import PicklePersistence
-from open_ai_image_handler import (
-    get_image_description_as_json,
-    PROMPT_IMG_2_JSON_EVENTS,
-)
+from open_ai_image_handler import Event, get_image_description_as_json
 import re
 from telegram.constants import ParseMode
 from telegram.ext import CallbackQueryHandler
 from cal2mail_utils import EmailCalendarInvite
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from open_ai_image_handler import Event
 
 USER_EMAIL_KEY = "user_email_adress"
 USER_IS_EXPERT_KEY = "user_is_expert"
@@ -52,13 +49,94 @@ def setup_logging() -> logging.Logger:
 
 logger = setup_logging()
 
-async def get_event_tile(update, event: Event, reply_markup):
-    address_string = f" at <b>{event.address}</b>" if event.address else ""
-    await update.message.reply_text(
-        f"<b>{event.name}</b>\n<i>{event.readable_datetime_str}</i>{address_string}",
-        reply_markup=reply_markup,
+def event_summary(event: Event) -> str:
+    address = f"\n{escape(event.address)}" if event.address else ""
+    return f"<b>{escape(event.name)}</b>\n<i>{event.readable_datetime_str}</i>{address}"
+
+
+def event_buttons(event_id):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Send", callback_data=f"send_{event_id}"),
+            InlineKeyboardButton("✏️ Edit", callback_data=f"edit_{event_id}"),
+            InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{event_id}"),
+        ]
+    ])
+
+
+async def ask_event_detail(message, context, event_id, event, field):
+    if field == "time":
+        has_date = event.datetime is not None or event.event_date is not None
+        question = "What time does it start? Reply with HH:MM." if has_date else (
+            "When does it start? Reply with YYYY-MM-DD HH:MM."
+        )
+    else:
+        question = "Where is it? Reply with the venue name or address."
+
+    prompt = await message.reply_text(
+        f"{event_summary(event)}\n\n{question}",
+        reply_markup=ForceReply(),
         parse_mode=ParseMode.HTML,
     )
+    context.chat_data[f"event_reply:{prompt.message_id}"] = (event_id, field)
+    context.chat_data[event_id]["reply_pending"] = True
+
+
+async def show_event(message, context, event_id, event):
+    if event.datetime is None:
+        await ask_event_detail(message, context, event_id, event, "time")
+    elif not event.address:
+        await ask_event_detail(message, context, event_id, event, "location")
+    else:
+        await message.reply_text(
+            event_summary(event),
+            reply_markup=event_buttons(event_id),
+            parse_mode=ParseMode.HTML,
+        )
+
+
+async def handle_event_reply(update, context):
+    message = update.message
+    if message.reply_to_message is None:
+        return False
+    key = f"event_reply:{message.reply_to_message.message_id}"
+    pending = context.chat_data.get(key)
+    if pending is None:
+        return False
+
+    event_id, field = pending
+    data = context.chat_data.get(event_id)
+    if data is None or data.get("owner_id", update.effective_user.id) != update.effective_user.id:
+        return True
+
+    event = Event.model_validate(data)
+    value = message.text.strip()
+    if field == "time":
+        event_date = event.datetime.date() if event.datetime is not None else event.event_date
+        try:
+            if event_date is None:
+                event.datetime = datetime.strptime(value, "%Y-%m-%d %H:%M")
+            else:
+                event.datetime = datetime.combine(event_date, datetime.strptime(value, "%H:%M").time())
+        except ValueError:
+            await message.reply_text(
+                "Use HH:MM (for example 18:30)." if event_date is not None
+                else "Use YYYY-MM-DD HH:MM (for example 2026-12-03 18:30)."
+            )
+            return True
+        event.event_date = event.datetime.date()
+    else:
+        if not value or "\n" in value or "\r" in value:
+            await message.reply_text("Please enter the venue name or address on one line.")
+            return True
+        event.address = value
+
+    data.update(event.model_dump())
+    data.pop("reply_pending", None)
+    del context.chat_data[key]
+    await show_event(message, context, event_id, event)
+    return True
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {update.effective_user.id} ({update.effective_user.first_name}) started the bot")
@@ -78,31 +156,24 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Image is saved. Processing...")
 
     try:
-        response = get_image_description_as_json(
-            image_path=filename, prompt=PROMPT_IMG_2_JSON_EVENTS
-        )
+        response = await asyncio.to_thread(get_image_description_as_json, image_path=filename)
         logger.info(f"Image processed successfully for user {user.id}")
-        await update.message.reply_text(f"Checking: {response.message}")
+        if not response.events:
+            await update.message.reply_text("No events found in this image.")
 
         for event in response.events:
             event_id = str(uuid4())
-            context.chat_data.update({event_id: event.model_dump()})
-            logger.info(f"Event '{event.name}' extracted and stored with ID {event_id}")
+            context.chat_data[event_id] = {**event.model_dump(), "owner_id": user.id}
+            await show_event(update.message, context, event_id, event)
 
-            button_list = [
-                InlineKeyboardButton("✅ Send", callback_data=f"send_{event_id}"),
-                InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{event_id}"),
-            ]
-            reply_markup = InlineKeyboardMarkup([button_list])
-
-            await get_event_tile(update, event, reply_markup)
-
-    except ValueError as e:
-        logger.error(f"Error processing image for user {user.id}: {str(e)}")
-        await update.message.reply_text(f"Error: {e}")
+    except (ValueError, OpenAIError):
+        logger.exception("Image processing failed for user %s", user.id)
+        await update.message.reply_text("Could not process this image. Please try again.")
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_event_reply(update, context):
+        return
     user = update.effective_user
     logger.info(f"Received text message from user {user.id} ({user.first_name})")
 
@@ -145,28 +216,52 @@ async def set_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-
     user = update.effective_user
-    action, event_id = query.data.split("_")
+    action, event_id = query.data.split("_", 1)
     event_data = context.chat_data.get(event_id)
 
     if not event_data:
-        logger.warning(f"Event data not found for ID {event_id} (User: {user.id})")
-        await query.edit_message_text("Event data not found.")
+        await query.answer("Event data not found.")
+        return
+    if event_data.get("owner_id", user.id) != user.id:
+        await query.answer("Only the person who submitted the event can change it.")
         return
 
+    if event_data.get("reply_pending"):
+        await query.answer("Please reply to the question in the chat.")
+        return
+
+    await query.answer()
     event = Event(**event_data)
 
-    if action == "send":
-        logger.info(f"User {user.id} approved event: {event.name}")
-        await query.edit_message_text(
-            f"✅ ✉️ <b>{event.name}</b>\n<i>{event.readable_datetime_str}</i>",
-            parse_mode=ParseMode.HTML,
-        )
+    if action == "edit":
+        await query.edit_message_reply_markup(InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Time", callback_data=f"time_{event_id}"),
+                InlineKeyboardButton("Location", callback_data=f"location_{event_id}"),
+                InlineKeyboardButton("Back", callback_data=f"back_{event_id}"),
+            ]
+        ]))
+        return
+    if action == "back":
+        await query.edit_message_reply_markup(event_buttons(event_id))
+        return
+    if action in ("time", "location"):
+        event_data.setdefault("owner_id", user.id)
+        await ask_event_detail(query.message, context, event_id, event, action)
+        await query.edit_message_reply_markup(reply_markup=None)
+        return
+    if action == "send" and (event.datetime is None or not event.address):
+        event_data.setdefault("owner_id", user.id)
+        await show_event(query.message, context, event_id, event)
+        await query.edit_message_reply_markup(reply_markup=None)
+        return
 
+    if action == "send":
         user_email = context.user_data.get(USER_EMAIL_KEY)
-        user_name = update.effective_user.first_name
+        if not user_email:
+            await query.message.reply_text("Please set your email address with /email first.")
+            return
 
         email = EmailCalendarInvite(
             from_name="Image2Cal",
@@ -175,17 +270,20 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             body=event.name,
             start=event.datetime,
             address=event.address,
-            organizer=user_name,
+            organizer=user.first_name,
             timezone=TIMEZONE
         )
-        email.create_invite_mail()
-        email.send_invite()
-        logger.info(f"Calendar invite sent to {user_email} for event: {event.name}")
+        await asyncio.to_thread(email.send_invite)
+        del context.chat_data[event_id]
+        await query.edit_message_text(
+            f"✅ ✉️ {event_summary(event)}", parse_mode=ParseMode.HTML
+        )
+        return
 
     elif action == "cancel":
         logger.info(f"User {user.id} cancelled event: {event.name}")
         await query.edit_message_text(
-            f"❌ <b>{event.name}</b>\n<i>{event.readable_datetime_str}</i>",
+            f"❌ {event_summary(event)}",
             parse_mode=ParseMode.HTML,
         )
 
@@ -207,9 +305,11 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("email", set_email))
-    app.add_handler(CallbackQueryHandler(button_callback_handler))
+    app.add_handler(CallbackQueryHandler(
+        button_callback_handler, pattern=r"^(send|cancel|edit|time|location|back)_[0-9a-f-]+$"
+    ))
     app.add_handler(MessageHandler(PHOTO, handle_image))
-    app.add_handler(MessageHandler(TEXT, handle_text))
+    app.add_handler(MessageHandler(TEXT & ~COMMAND, handle_text))
 
     # Set up aiohttp web server
     web_app = web.Application()
@@ -224,7 +324,7 @@ def main():
     loop.run_until_complete(site.start())
 
     logger.info("Bot is ready to receive messages and web server is running")
-    loop.run_until_complete(app.run_polling())
+    app.run_polling()
 
 
 

@@ -65,6 +65,8 @@ class EmailCalendarInvite:
         # First, define the timezone
         tz_id = self.timezone_str
 
+        location = (self.address or "").replace("\\", "\\\\").replace("\r\n", "\n")
+        location = location.replace("\r", "\n").replace("\n", "\\n").replace(";", "\\;").replace(",", "\\,")
         ical = (f"BEGIN:VCALENDAR{self.CRLF}"
                 f"PRODID:-//{ORG}//{ORG}//{LANG}{self.CRLF}"
                 f"VERSION:2.0{self.CRLF}"
@@ -80,7 +82,7 @@ class EmailCalendarInvite:
                 f"CREATED:{dtstamp}{self.CRLF}"
                 f"DESCRIPTION:{self.description}{self.CRLF}"
                 f"LAST-MODIFIED:{dtstamp}{self.CRLF}"
-                f"LOCATION:{self.address}{self.CRLF}"
+                f"LOCATION:{location}{self.CRLF}"
                 f"SEQUENCE:0{self.CRLF}"
                 f"STATUS:CONFIRMED{self.CRLF}"
                 f"SUMMARY:{self.subject}{self.CRLF}"
